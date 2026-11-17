@@ -21,10 +21,14 @@ count as resolved.
 
 ### As a Claude Code plugin (easiest)
 
-In Claude Code:
+In Claude Code, run these two commands one at a time (pasting both at once
+sends them as one command, which fails):
 
 ```
 /plugin marketplace add dcraciun07/pr-comments-dashboard
+```
+
+```
 /plugin install pr-comments-dashboard@pr-comments-dashboard
 ```
 
