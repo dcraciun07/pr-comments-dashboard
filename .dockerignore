@@ -1,0 +1,7 @@
+.env
+node_modules
+.git
+*.md
+.claude-plugin
+skills
+LICENSE

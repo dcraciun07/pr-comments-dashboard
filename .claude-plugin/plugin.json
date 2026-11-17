@@ -1,0 +1,8 @@
+{
+  "name": "pr-comments-dashboard",
+  "description": "Local dashboard of review and conversation comments on your GitHub PRs, plus replies to you on other people's PRs.",
+  "version": "1.0.0",
+  "author": { "name": "dcraciun07" },
+  "repository": "https://github.com/dcraciun07/pr-comments-dashboard",
+  "license": "MIT"
+}

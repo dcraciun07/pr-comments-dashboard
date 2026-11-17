@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR Comments</title>
+<style>
+  :root {
+    --bg: #f6f8fa; --card: #fff; --border: #d0d7de; --text: #1f2328; --muted: #656d76;
+    --accent: #0969da; --chip: #eaeef2; --warn: #9a6700; --warn-bg: #fff8c5;
+    --ok: #1a7f37; --ok-bg: #dafbe1; --merged: #8250df; --merged-bg: #fbefff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8d96a0;
+      --accent: #4493f8; --chip: #21262d; --warn: #d29922; --warn-bg: #2e2a1f;
+      --ok: #3fb950; --ok-bg: #1b2e22; --merged: #a371f7; --merged-bg: #2a1f3d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header { position: sticky; top: 0; z-index: 1; background: var(--bg);
+    border-bottom: 1px solid var(--border); padding: 12px 16px; }
+  .bar { max-width: 960px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  h1 { font-size: 16px; margin: 0 12px 0 0; }
+  select, input[type=search], button {
+    font: inherit; color: var(--text); background: var(--card);
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+  input[type=search] { flex: 1 1 200px; min-width: 160px; }
+  select { max-width: 220px; }
+  button { cursor: pointer; }
+  label.check { display: flex; gap: 4px; align-items: center; color: var(--muted); }
+  .status { max-width: 960px; margin: 8px auto 0; color: var(--muted); font-size: 12px;
+    display: flex; gap: 12px; flex-wrap: wrap; }
+
+  main { max-width: 960px; margin: 0 auto; padding: 12px 16px 40px; display: grid; gap: 8px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+  .card.unreacted { border-left: 3px solid var(--warn); }
+  .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .meta img { width: 18px; height: 18px; border-radius: 50%; }
+  .meta .author { color: var(--text); font-weight: 600; }
+  .meta .pr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 380px; }
+  .meta .spacer { flex: 1; }
+  .badge { background: var(--chip); border-radius: 10px; padding: 0 7px; font-size: 11px; }
+  .badge.warn { background: var(--warn-bg); color: var(--warn); }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .card.resolved { opacity: .7; }
+  .badge.merged { background: var(--merged-bg); color: var(--merged); }
+  .path { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); margin-top: 4px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .body { margin-top: 6px; white-space: pre-wrap; word-break: break-word; cursor: pointer;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .body.open { display: block; }
+  .foot { display: flex; gap: 10px; margin-top: 6px; font-size: 12px; color: var(--muted); align-items: center; }
+  .empty, .error { text-align: center; color: var(--muted); padding: 40px 0; }
+  .error { color: #cf222e; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>PR Comments</h1>
+    <input type="search" id="text" placeholder="Search comment text…">
+    <select id="author"></select>
+    <select id="repo"></select>
+    <select id="pr"></select>
+    <select id="source">
+      <option value="mine">On my PRs</option>
+      <option value="others">Replies to me on others' PRs</option>
+      <option value="any">Mine + replies to me</option>
+    </select>
+    <select id="state">
+      <option value="open">Open PRs</option>
+      <option value="merged">Merged PRs</option>
+      <option value="any">Open + merged PRs</option>
+    </select>
+    <select id="kind">
+      <option value="">Review + conversation</option>
+      <option value="review">Review comments</option>
+      <option value="conversation">Conversation comments</option>
+    </select>
+    <select id="reacted">
+      <option value="">Reacted + unreacted</option>
+      <option value="unreacted">Unreacted</option>
+      <option value="reacted">Reacted</option>
+    </select>
+    <select id="resolved">
+      <option value="">Resolved + unresolved</option>
+      <option value="unresolved">Unresolved</option>
+      <option value="resolved">Resolved</option>
+    </select>
+    <label class="check"><input type="checkbox" id="hideMine"> Hide mine</label>
+    <button id="refresh" title="Re-fetch from GitHub (R)">↻ Refresh</button>
+  </div>
+  <div class="status" id="status">Loading…</div>
+</header>
+<main id="list"></main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const EMOJI = { "+1": "👍", "-1": "👎", laugh: "😄", hooray: "🎉", confused: "😕", heart: "❤️", rocket: "🚀", eyes: "👀" };
+const FILTERS = ["text", "author", "repo", "pr", "source", "state", "kind", "reacted", "resolved", "hideMine"];
+let data = { comments: [], viewer: "" };
+
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function ago(iso) {
+  const s = (Date.now() - Date.parse(iso)) / 1000;
+  for (const [unit, n] of [["y", 31536000], ["mo", 2592000], ["d", 86400], ["h", 3600], ["m", 60]]) {
+    if (s >= n) return Math.floor(s / n) + unit + " ago";
+  }
+  return "just now";
+}
+
+// Filter state lives in the URL so views can be bookmarked / survive reloads.
+// It's also saved to localStorage, so opening the bare URL restores the last view.
+const SAVED = "pr-comments-filters";
+function readUrl() {
+  let saved = "";
+  try { saved = localStorage.getItem(SAVED) || ""; } catch {}
+  const p = new URLSearchParams(location.search || saved);
+  $("text").value = p.get("text") || "";
+  $("reacted").value = p.get("reacted") ?? "unreacted";
+  $("resolved").value = p.get("resolved") || "";
+  $("source").value = p.get("source") || "mine";
+  $("state").value = p.get("state") || "open";
+  $("kind").value = p.get("kind") || "";
+  $("hideMine").checked = p.get("hideMine") !== "0";
+  return { author: p.get("author") || "", repo: p.get("repo") || "", pr: p.get("pr") || "" };
+}
+
+function writeUrl() {
+  const p = new URLSearchParams();
+  for (const f of ["text", "author", "repo", "pr", "source", "state", "kind", "reacted", "resolved"]) p.set(f, $(f).value);
+  p.set("hideMine", $("hideMine").checked ? "1" : "0");
+  for (const [k, v] of [...p]) if (v === "" && k !== "reacted") p.delete(k);
+  history.replaceState(null, "", "?" + p);
+  try { localStorage.setItem(SAVED, p.toString()); } catch {}
+}
+
+function fillSelect(el, allLabel, entries, keep) {
+  const prev = keep ?? el.value;
+  el.innerHTML = `<option value="">${allLabel}</option>` +
+    entries.map(([v, label, n]) => `<option value="${esc(v)}">${esc(label)} (${n})</option>`).join("");
+  el.value = entries.some(([v]) => v === prev) ? prev : "";
+}
+
+function countBy(items, key) {
+  const m = new Map();
+  for (const c of items) m.set(key(c), (m.get(key(c)) || 0) + 1);
+  return m;
+}
+
+// Each dropdown's options are counted against every *other* active filter,
+// so the numbers always reflect what you'd see if you picked that option.
+function matches(c, skip) {
+  const f = {
+    text: $("text").value.trim().toLowerCase(),
+    author: $("author").value, repo: $("repo").value, pr: $("pr").value,
+    source: $("source").value, state: $("state").value, kind: $("kind").value, reacted: $("reacted").value, resolved: $("resolved").value, hideMine: $("hideMine").checked,
+  };
+  if (f.hideMine && c.author === data.viewer) return false;
+  if (f.source !== "any" && c.onMyPr !== (f.source === "mine")) return false;
+  if (f.state !== "any" && c.prState !== f.state) return false;
+  if (f.kind && c.kind !== f.kind) return false;
+  if (skip !== "author" && f.author && c.author !== f.author) return false;
+  if (skip !== "repo" && f.repo && c.repo !== f.repo) return false;
+  if (skip !== "pr" && f.pr && `${c.repo}#${c.pr}` !== f.pr) return false;
+  if (f.reacted === "unreacted" && c.reactionCount > 0) return false;
+  if (f.reacted === "reacted" && c.reactionCount === 0) return false;
+  // resolved is null if GitHub didn't report thread state; keep those visible as unresolved.
+  if (f.resolved === "resolved" && c.resolved !== true) return false;
+  if (f.resolved === "unresolved" && c.resolved === true) return false;
+  if (f.text && !c.body.toLowerCase().includes(f.text)) return false;
+  return true;
+}
+
+function refreshOptions(keep = {}) {
+  const sorted = (m, label = (k) => k) => [...m].sort((a, b) => a[0].localeCompare(b[0])).map(([k, n]) => [k, label(k), n]);
+  const titles = new Map(data.comments.map((c) => [`${c.repo}#${c.pr}`, c.prTitle]));
+  fillSelect($("author"), "All authors", sorted(countBy(data.comments.filter((c) => matches(c, "author")), (c) => c.author)), keep.author);
+  fillSelect($("repo"), "All repos", sorted(countBy(data.comments.filter((c) => matches(c, "repo")), (c) => c.repo)), keep.repo);
+  fillSelect($("pr"), "All PRs",
+    sorted(countBy(data.comments.filter((c) => matches(c, "pr")), (c) => `${c.repo}#${c.pr}`),
+      (k) => `${k.split("/").pop()} ${titles.get(k)}`), keep.pr);
+}
+
+function card(c) {
+  const reactions = Object.entries(c.reactions).map(([k, n]) => `${EMOJI[k] || k} ${n}`).join("  ");
+  const where = c.line ? `${c.path}:${c.line}` : c.path;
+  return `<article class="card ${c.reactionCount ? "" : "unreacted"} ${c.resolved ? "resolved" : ""}">
+    <div class="meta">
+      ${c.avatar ? `<img src="${esc(c.avatar)}&s=36" alt="">` : ""}
+      <span class="author">${esc(c.author)}</span>
+      ${c.kind === "conversation" ? `<span class="badge">conversation</span>` : ""}
+      ${c.isReply ? `<span class="badge">reply</span>` : ""}
+      ${c.resolved ? `<span class="badge ok">resolved</span>` : ""}
+      ${c.outdated ? `<span class="badge">outdated</span>` : ""}
+      ${c.prState === "merged" ? `<span class="badge merged">merged</span>` : ""}
+      <span>·</span>
+      <span>${esc(c.repo)}</span>
+      <a class="pr" href="${esc(c.prUrl)}" target="_blank" rel="noopener" title="${esc(c.prTitle)}">#${c.pr} ${esc(c.prTitle)}</a>
+      ${c.onMyPr ? "" : `<span class="badge">by ${esc(c.prAuthor)}</span>`}
+      <span class="spacer"></span>
+      <span title="${esc(c.createdAt)}">${ago(c.createdAt)}</span>
+    </div>
+    ${c.path ? `<div class="path" title="${esc(where)}">${esc(where)}${c.side === "LEFT" ? " (base version)" : ""}</div>` : ""}
+    <div class="body" title="Click to expand">${esc(c.body)}</div>
+    <div class="foot">
+      ${c.reactionCount ? `<span>${reactions}</span>` : `<span class="badge warn">no reactions</span>`}
+      ${c.replyCount == null ? "" : c.replyCount ? `<span title="Later comments in this thread">💬 ${c.replyCount} ${c.replyCount === 1 ? "reply" : "replies"}</span>` : `<span class="badge warn">no replies</span>`}
+      <span class="spacer" style="flex:1"></span>
+      ${c.vscodeFileUrl ? `<a href="${esc(c.vscodeFileUrl)}" title="Open ${esc(c.localPath)} at line ${c.line ?? 1} in VS Code. The thread and its Resolve button show inline once the PR is checked out.">Open in VS Code</a>` : ""}
+      ${c.vscodeCheckoutUrl ? `<a href="${esc(c.vscodeCheckoutUrl)}" title="Check out this PR with the GitHub Pull Requests extension. This switches the branch of your local ${esc(c.repo)} clone.">Check out PR</a>` : ""}
+      <a href="${esc(c.url)}" target="_blank" rel="noopener">Open comment ↗</a>
+    </div>
+  </article>`;
+}
+
+let pendingSelection = {};
+
+function render() {
+  refreshOptions(pendingSelection);
+  refreshOptions(); // second pass so counts reflect the restored selections
+  pendingSelection = {};
+  writeUrl();
+  const shown = data.comments.filter((c) => matches(c));
+  $("list").innerHTML = shown.length ? shown.map(card).join("") : `<div class="empty">No comments match these filters.</div>`;
+  $("status").innerHTML =
+    `<span>${shown.length} of ${data.comments.length} comments</span>` +
+    `<span>${data.openPrCount} open + ${data.mergedPrCount} merged PRs (last ${data.mergedDays}d) by ${esc(data.viewer)}</span>` +
+    `<span>${data.otherPrCount} others' PRs you reviewed or commented on</span>` +
+    `<span title="${esc(data.fetchedAt)}">fetched ${ago(data.fetchedAt)}</span>`;
+}
+
+async function load(force) {
+  $("refresh").disabled = true;
+  $("status").textContent = force ? "Refreshing from GitHub…" : "Loading…";
+  try {
+    const res = await fetch("/api/comments" + (force ? "?refresh=1" : ""));
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || res.statusText);
+    data = json;
+    render();
+  } catch (err) {
+    $("status").textContent = "";
+    $("list").innerHTML = `<div class="error">Failed to load: ${esc(err.message)}</div>`;
+  } finally {
+    $("refresh").disabled = false;
+  }
+}
+
+$("list").addEventListener("click", (e) => {
+  const body = e.target.closest(".body");
+  if (body && !getSelection().toString()) body.classList.toggle("open");
+});
+for (const f of FILTERS) $(f).addEventListener(f === "text" ? "input" : "change", render);
+$("refresh").addEventListener("click", () => load(true));
+// "r" refreshes, unless you're typing in a filter or using a browser shortcut.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "r" || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+  if (e.target.closest("input, select, textarea") || $("refresh").disabled) return;
+  e.preventDefault();
+  load(true);
+});
+
+pendingSelection = readUrl();
+load(false);
+</script>
+</body>
+</html>

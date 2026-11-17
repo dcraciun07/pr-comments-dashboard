@@ -1,0 +1,16 @@
+services:
+  dashboard:
+    build: .
+    container_name: pr-comments-dashboard
+    ports:
+      - "127.0.0.1:${PORT:-8787}:8787"
+    environment:
+      - GH_TOKEN=${GH_TOKEN:?Set GH_TOKEN in .env (see .env.example)}
+      - GITHUB_AUTHOR
+      - CACHE_TTL_SECONDS
+      - CONCURRENCY
+      - MERGED_DAYS
+      # Host paths only used to build vscode:// links; nothing is mounted.
+      - REPOS_DIR=${REPOS_DIR:-${HOME}}
+      - REPO_PATHS
+    restart: unless-stopped

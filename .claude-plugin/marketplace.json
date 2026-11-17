@@ -1,0 +1,14 @@
+{
+  "name": "pr-comments-dashboard",
+  "description": "Claude Code plugin for a local dashboard of comments on your GitHub PRs.",
+  "owner": {
+    "name": "dcraciun07"
+  },
+  "plugins": [
+    {
+      "name": "pr-comments-dashboard",
+      "source": "./",
+      "description": "Local dashboard of review and conversation comments on your GitHub PRs, plus replies to you on other people's PRs."
+    }
+  ]
+}
