@@ -31,7 +31,7 @@ PORT="${PORT:-8787}"
 URL="http://localhost:$PORT"
 # Hash of the code, so a git pull or plugin update triggers a restart. (Plugin
 # installs aren't git checkouts, so the commit sha isn't available there.)
-VERSION="$(cat "$DIR/server.js" "$DIR/mcp.js" "$DIR/public/index.html" | shasum | cut -c1-12)"
+VERSION="$(cat "$DIR/server.js" "$DIR/mcp.js" "$DIR/notify.js" "$DIR/public/index.html" | shasum | cut -c1-12)"
 
 running_pid() {
   [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && cat "$PIDFILE"

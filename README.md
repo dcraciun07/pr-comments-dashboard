@@ -90,6 +90,35 @@ open at the line where the comment was originally made.
 After resolving in VS Code, click **↻ Refresh** and the **Resolved** filter picks
 it up.
 
+## Notifications
+
+While it runs (via `start.sh` or the plugin), the dashboard checks GitHub every
+minute and shows a desktop notification for each new comment it would show you,
+except your own: comments on your PRs (💬) and replies to you on other people's
+PRs (↩️). More than four at once become a single summary that opens the
+dashboard.
+
+On macOS, install [terminal-notifier](https://github.com/julienXX/terminal-notifier)
+(`brew install terminal-notifier`) so clicking a notification opens the comment
+on GitHub. Without it, notifications come from Script Editor via `osascript` and
+clicking them does nothing useful. The first time, macOS may need you to allow
+notifications for terminal-notifier (or Script Editor) in System Settings >
+Notifications; until then it falls back to `osascript`. On Linux it uses `notify-send`. The Docker
+version doesn't notify.
+
+Each check only runs the PR searches and re-fetches the PRs that changed, so it
+stays well inside GitHub's rate limits. The first run remembers the comments that
+are already there without notifying; after that, what it has seen is kept in
+`~/.local/state/pr-comments-dashboard/notified.json`, so restarting doesn't
+repeat notifications, and comments posted while it was stopped are announced
+when it starts again.
+
+Settings (in `~/.config/pr-comments-dashboard/env`): `NOTIFY=0` turns
+notifications off, `NOTIFY_INTERVAL_SECONDS` changes how often it checks
+(default 60, minimum 30), and `NOTIFY_SOUND` picks the macOS sound (empty for
+silent). `NOTIFY_INCLUDE_MINE=1` also notifies about your own comments, which is
+an easy way to check notifications work.
+
 ## Use from Claude (MCP)
 
 The server also serves an MCP endpoint at `http://localhost:8787/mcp`

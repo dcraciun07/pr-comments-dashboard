@@ -4,6 +4,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const { handleMcp } = require("./mcp");
+const { startNotifier } = require("./notify");
 
 const PORT = Number(process.env.PORT || 8787);
 // Loopback by default: the API serves data fetched with your token. The Docker
@@ -140,9 +141,15 @@ function repliesToViewer(review, conversation) {
   ];
 }
 
-async function loadComments() {
+async function ensureViewer() {
   if (!viewer) viewer = (await gh("/user")).body.login;
+  return viewer;
+}
 
+// The PRs the dashboard covers. Search results carry updated_at, which changes
+// whenever someone comments, so the notifier can poll this cheaply.
+async function searchPrs() {
+  await ensureViewer();
   const search = (q) => ghAll(`/search/issues?q=${encodeURIComponent(q)}&per_page=100`);
   const since = new Date(Date.now() - MERGED_DAYS * 86400000).toISOString().slice(0, 10);
   // Other people's PRs you took part in. reviewed-by covers inline review comments,
@@ -162,99 +169,98 @@ async function loadComments() {
     ...merged.map((pr) => ({ ...pr, state: "merged", mine: true })),
     ...otherPrs.map((pr) => ({ ...pr, state: pr.pull_request?.merged_at ? "merged" : "open", mine: false })),
   ];
+  return { prs, openPrCount: open.length, mergedPrCount: merged.length, otherPrCount: otherPrs.length };
+}
 
-  const perPr = await mapLimit(prs, CONCURRENCY, async (pr) => {
-    const repo = pr.repository_url.replace(`${API}/repos/`, "");
-    const [comments, states, issueComments] = await Promise.all([
-      ghAll(`/repos/${repo}/pulls/${pr.number}/comments?per_page=100`),
-      threadStates(repo, pr.number).catch((err) => {
-        console.error(err.message);
-        return new Map();
-      }),
-      // Search results carry the conversation comment count, so skip the call when there are none.
-      pr.comments ? ghAll(`/repos/${repo}/issues/${pr.number}/comments?per_page=100`) : [],
-    ]);
-    const dir = localRepoDir(repo);
-    // Merged PRs are already on the base branch, so there's nothing to check out.
-    const checkoutUrl = pr.state === "merged" ? null : `${PR_EXTENSION}/checkout-pull-request?uri=${encodeURIComponent(pr.html_url)}`;
-    const common = (c) => ({
-      id: c.id,
-      url: c.html_url,
-      author: c.user?.login ?? "ghost",
-      avatar: c.user?.avatar_url ?? "",
-      repo,
-      pr: pr.number,
-      prTitle: pr.title,
-      prUrl: pr.html_url,
-      prState: pr.state,
-      prAuthor: pr.user?.login ?? "ghost",
-      onMyPr: pr.mine,
-      body: c.body ?? "",
-      vscodeCheckoutUrl: checkoutUrl,
-      createdAt: c.created_at,
-      reactions: Object.fromEntries(
-        ["+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes"]
-          .map((k) => [k, c.reactions?.[k] ?? 0])
-          .filter(([, n]) => n > 0)
-      ),
-      reactionCount: c.reactions?.total_count ?? 0,
-    });
-    const review = comments.map((c) => {
-      const state = states.get(c.id);
-      // Outdated comments have no current line; fall back to where they were made.
-      const line = c.line ?? c.original_line ?? null;
-      const localPath = dir && c.path ? `${dir}/${c.path}` : null;
-      return {
-        ...common(c),
-        kind: "review",
-        path: c.path,
-        line,
-        side: c.side ?? null,
-        localPath,
-        vscodeFileUrl: localPath
-          ? `vscode://file${localPath.split("/").map(encodeURIComponent).join("/")}${line ? ":" + line : ""}`
-          : null,
-        resolved: state ? state.resolved : null,
-        outdated: state ? state.outdated : c.line == null,
-        isReply: Boolean(c.in_reply_to_id),
-        inReplyTo: c.in_reply_to_id ?? null,
-      };
-    });
-    // Replies to a review comment are the later comments in its thread. Count them
-    // before repliesToViewer drops anything, so the number matches GitHub.
-    for (const c of review) {
-      const thread = c.inReplyTo ?? c.id;
-      c.replyCount = review.filter((r) => (r.inReplyTo ?? r.id) === thread && r.createdAt > c.createdAt).length;
-    }
-    // Conversation-tab comments aren't tied to a file or thread. CI and other
-    // bots post most of these, so keep only comments from real people.
-    const conversation = issueComments
-      .filter((c) => c.user?.type !== "Bot" && !c.user?.login?.endsWith("[bot]"))
-      .map((c) => ({
-        ...common(c),
-        kind: "conversation",
-        path: null,
-        line: null,
-        side: null,
-        localPath: null,
-        vscodeFileUrl: null,
-        resolved: null,
-        outdated: false,
-        isReply: false,
-        inReplyTo: null,
-        replyCount: null, // no threading on the Conversation tab
-      }));
-    return pr.mine ? [...review, ...conversation] : repliesToViewer(review, conversation);
+async function loadPr(pr) {
+  const repo = pr.repository_url.replace(`${API}/repos/`, "");
+  const [comments, states, issueComments] = await Promise.all([
+    ghAll(`/repos/${repo}/pulls/${pr.number}/comments?per_page=100`),
+    threadStates(repo, pr.number).catch((err) => {
+      console.error(err.message);
+      return new Map();
+    }),
+    // Search results carry the conversation comment count, so skip the call when there are none.
+    pr.comments ? ghAll(`/repos/${repo}/issues/${pr.number}/comments?per_page=100`) : [],
+  ]);
+  const dir = localRepoDir(repo);
+  // Merged PRs are already on the base branch, so there's nothing to check out.
+  const checkoutUrl = pr.state === "merged" ? null : `${PR_EXTENSION}/checkout-pull-request?uri=${encodeURIComponent(pr.html_url)}`;
+  const common = (c) => ({
+    id: c.id,
+    url: c.html_url,
+    author: c.user?.login ?? "ghost",
+    avatar: c.user?.avatar_url ?? "",
+    repo,
+    pr: pr.number,
+    prTitle: pr.title,
+    prUrl: pr.html_url,
+    prState: pr.state,
+    prAuthor: pr.user?.login ?? "ghost",
+    onMyPr: pr.mine,
+    body: c.body ?? "",
+    vscodeCheckoutUrl: checkoutUrl,
+    createdAt: c.created_at,
+    reactions: Object.fromEntries(
+      ["+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes"]
+        .map((k) => [k, c.reactions?.[k] ?? 0])
+        .filter(([, n]) => n > 0)
+    ),
+    reactionCount: c.reactions?.total_count ?? 0,
   });
+  const review = comments.map((c) => {
+    const state = states.get(c.id);
+    // Outdated comments have no current line; fall back to where they were made.
+    const line = c.line ?? c.original_line ?? null;
+    const localPath = dir && c.path ? `${dir}/${c.path}` : null;
+    return {
+      ...common(c),
+      kind: "review",
+      path: c.path,
+      line,
+      side: c.side ?? null,
+      localPath,
+      vscodeFileUrl: localPath
+        ? `vscode://file${localPath.split("/").map(encodeURIComponent).join("/")}${line ? ":" + line : ""}`
+        : null,
+      resolved: state ? state.resolved : null,
+      outdated: state ? state.outdated : c.line == null,
+      isReply: Boolean(c.in_reply_to_id),
+      inReplyTo: c.in_reply_to_id ?? null,
+    };
+  });
+  // Replies to a review comment are the later comments in its thread. Count them
+  // before repliesToViewer drops anything, so the number matches GitHub.
+  for (const c of review) {
+    const thread = c.inReplyTo ?? c.id;
+    c.replyCount = review.filter((r) => (r.inReplyTo ?? r.id) === thread && r.createdAt > c.createdAt).length;
+  }
+  // Conversation-tab comments aren't tied to a file or thread. CI and other
+  // bots post most of these, so keep only comments from real people.
+  const conversation = issueComments
+    .filter((c) => c.user?.type !== "Bot" && !c.user?.login?.endsWith("[bot]"))
+    .map((c) => ({
+      ...common(c),
+      kind: "conversation",
+      path: null,
+      line: null,
+      side: null,
+      localPath: null,
+      vscodeFileUrl: null,
+      resolved: null,
+      outdated: false,
+      isReply: false,
+      inReplyTo: null,
+      replyCount: null, // no threading on the Conversation tab
+    }));
+  return pr.mine ? [...review, ...conversation] : repliesToViewer(review, conversation);
+}
 
+async function loadComments() {
+  const { prs, ...counts } = await searchPrs();
+  const perPr = await mapLimit(prs, CONCURRENCY, loadPr);
   const comments = perPr.flat().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return {
-    viewer,
-    openPrCount: open.length,
-    mergedPrCount: merged.length,
-    otherPrCount: otherPrs.length,
-    mergedDays: MERGED_DAYS,
-    comments, fetchedAt: new Date().toISOString() };
+  return { viewer, ...counts, mergedDays: MERGED_DAYS, comments, fetchedAt: new Date().toISOString() };
 }
 
 let cache = null;
@@ -304,4 +310,15 @@ http
     }
     res.writeHead(404).end("Not found");
   })
-  .listen(PORT, HOST, () => console.log(`pr-comments-dashboard listening on http://localhost:${PORT}`));
+  .listen(PORT, HOST, () => {
+    console.log(`pr-comments-dashboard listening on http://localhost:${PORT}`);
+    startNotifier({
+      searchPrs,
+      loadPr,
+      getViewer: ensureViewer,
+      getData,
+      // New comments make the cached dashboard data stale.
+      onNewComments: () => (cache = null),
+      dashboardUrl: `http://localhost:${PORT}`,
+    });
+  });

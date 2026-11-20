@@ -52,6 +52,18 @@ instead of working around it. The usual cases:
 - Status: `bash "$APP/start.sh" status` (also prints the log path,
   `~/.local/state/pr-comments-dashboard/server.log`).
 
+## Notifications
+
+While running, it shows a desktop notification for each new comment from
+someone else that the dashboard would show (comments on the user's PRs, and
+replies to them on other people's PRs). On macOS, if `command -v
+terminal-notifier` finds nothing, mention that `brew install terminal-notifier`
+makes clicking a notification open the comment. To turn notifications off, add
+`NOTIFY=0` to `~/.config/pr-comments-dashboard/env` and restart. If the user
+says notifications don't appear, check the log for `Notifier:` lines and ask
+them to allow notifications for terminal-notifier (or Script Editor) in System
+Settings > Notifications.
+
 ## Settings
 
 Optional settings go in `~/.config/pr-comments-dashboard/env`, one `KEY=value`
